@@ -44,6 +44,7 @@ namespace pallache
             operators,
             function,
             comma,
+            internal,
         };
         struct token
         {
@@ -59,28 +60,21 @@ namespace pallache
         {
             bool builtin;
             std::vector<std::string> var;
-            std::string expr;
-            size_t dim()
-            {
-                return var.size();
-            }
+            std::vector<token> expr;
             functor(bool p=false)
             {
                 builtin=p;
             }
+            size_t dim()
+            {
+                return var.size();
+            }
             void substitute(size_t i,X x)
             {
                 PALLACHE_DEBUG_OUT("%s",var[i].c_str());
-                size_t p;
-                while((p=expr.find(var[i]))!=std::string::npos)
-                {
-                    std::string value=std::to_string(x);
-                    expr.replace(p,var[i].size(),value);
-                    p+=value.size();
-                }
+                for(token &t: expr) if(t.str==var[i]) t.str=std::to_string(x);
             }
         };
-        std::vector<token> tokens;
         std::unordered_map<std::string,X> variables;
         std::unordered_map<std::string,functor> functions;
         void init_var()
@@ -153,9 +147,11 @@ namespace pallache
             functions.emplace("delvar",functor(true));
             functions.emplace("delfunc",functor(true));
             functions.emplace("test",functor(false));
-            functions["test"].expr="$x $y **";
-            functions["test"].var.push_back("$x");
-            functions["test"].var.push_back("$y");
+            functions["test"].expr.push_back(token(types::number,"x"));
+            functions["test"].expr.push_back(token(types::number,"y"));
+            functions["test"].expr.push_back(token(types::operators,"**"));
+            functions["test"].var.push_back("x");
+            functions["test"].var.push_back("y");
         }
         void init()
         {
@@ -198,22 +194,8 @@ namespace pallache
             else if(a=="||") return 9;
             else return 10;
         }
-        void eval(std::string fnc,std::vector<X> &x)
+        void tokenize(std::string a,std::vector<token> &tokens)
         {
-            functor f=functions[fnc];
-            const size_t q=x.size();
-            const size_t I=f.dim();
-            for(size_t i=0;i<I;i++)
-            {
-                f.substitute(i,x[q-i-1]);
-                x.pop_back();
-            }
-            PALLACHE_DEBUG_OUT("%s",f.expr.c_str());
-            x.push_back(parse_postfix(f.expr));
-        }
-        void tokenize(std::string a)
-        {
-            tokens.clear();
             const size_t aSz=a.size();
             for(size_t i=0;i<aSz;)
             {
@@ -247,7 +229,9 @@ namespace pallache
                 else if(op(a[i]))
                 {
                     for(;k<aSz;k++) if(!op(a[k]) or a[k]=='-') break;
-                    tokens.push_back(token(types::operators,a.substr(j,k-j)));
+                    std::string b=a.substr(j,k-j);
+                    tokens.push_back(token(types::operators,b));
+                    if(b==":=") tokens.push_back(token(types::internal,""));
                     i+=k-j;
                 }
                 else if(a[i]=='(')
@@ -272,7 +256,7 @@ namespace pallache
             for(token x: tokens) PALLACHE_DEBUG_OUT("%s (%d)",x.str.c_str(),x.type);
             #endif
         }
-        void shuntyard()
+        void shuntyard(std::vector<token> &tokens)
         {
             std::stack<token> stack;
             std::vector<token> train;
@@ -331,6 +315,11 @@ namespace pallache
                     stack.pop();
                 }
                 break;
+                case types::internal:
+                {
+                    train.push_back(t);
+                }
+                break;
                 default:
                 {
                     throw std::string("pallache: syntax error");
@@ -349,7 +338,7 @@ namespace pallache
             for(token x: tokens) PALLACHE_DEBUG_OUT("%s (%d)",x.str.c_str(),x.type);
             #endif
         }
-        X rpncalc()
+        X rpncalc(std::vector<token> &tokens)
         {
             std::string newvar="";
             if(tokens.empty()) throw std::string("pallache: syntax error");
@@ -361,7 +350,30 @@ namespace pallache
             }
             else if(tokens[0].type==types::variable and tokens.back().str==":=")
             {
-                throw std::string("pallache: function definitions are not supported yet");
+                functor f(false);
+                tokens.pop_back();
+                std::string fname=tokens[0].str;
+                const size_t I=tokens.size();
+                for(size_t i=1;i<I;i++)
+                {
+                    if(tokens[i].type==types::variable) f.var.push_back(tokens[i].str);
+                    else if(tokens[i].type==types::internal)
+                    {
+                        i++;
+                        for(;i<I;i++)
+                        {
+                            f.expr.push_back(tokens[i]);
+                            for(std::string var: f.var) if(f.expr.back().str==var) f.expr.back().type=types::number;
+                        }
+                        functions.emplace(fname,f);
+                        const size_t J=f.dim();
+                        for(size_t j=0;j<J;j++) f.substitute(J-j-1,0.0);
+                        variables["ans"]=rpncalc(f.expr);
+                        return variables["ans"];
+                    }
+                    else throw std::string("pallache: in function definition of ")+fname+std::string(" ")+tokens[i].str+std::string(" is not a valid variable");
+                }
+                throw std::string("pallache: error in function definition of ")+fname;
             }
             else if(tokens[0].type==types::variable and tokens.back().str=="delvar")
             {
@@ -378,9 +390,22 @@ namespace pallache
                     else throw std::string("pallache: variable \"")+tokens[0].str+std::string("\" does not exist");
                 }
             }
-            else if(tokens[0].type==types::variable and tokens.back().str=="delfunc")
+            else if(tokens[0].type==types::function and tokens.back().str=="delfunc")
             {
-                throw std::string("pallache: function removal is not supported yet");
+                if(tokens.size()>2) throw std::string("pallache: syntax error");
+                else
+                {
+                    if(functions.find(tokens[0].str)!=functions.end())
+                    {
+                        if(!functions[tokens[0].str].builtin)
+                        {
+                            functions.erase(tokens[0].str);
+                            return variables["ans"];
+                        }
+                        else throw std::string("pallache: function \"")+tokens[0].str+std::string("\" is builtin");
+                    }
+                    else throw std::string("pallache: function \"")+tokens[0].str+std::string("\" does not exist");
+                }
             }
             std::vector<X> x;
             for(token t: tokens)
@@ -901,7 +926,19 @@ namespace pallache
                         }
                         else
                         {
-                            if(x.size()>=functions[t.str].dim()) eval(t.str,x);
+                            if(x.size()>=functions[t.str].dim())
+                            {
+                                functor f=functions[t.str];
+                                const size_t q=x.size();
+                                const size_t I=f.dim();
+                                for(size_t i=0;i<I;i++)
+                                {
+                                    f.substitute(I-i-1,x[q-i-1]);
+                                    x.pop_back();
+                                }
+                                for(token x: tokens) PALLACHE_DEBUG_OUT("%s (%d)",x.str.c_str(),x.type);
+                                x.push_back(rpncalc(f.expr));
+                            }
                             else throw std::string("pallache: syntax error");
                         }
                     }
@@ -931,14 +968,16 @@ namespace pallache
         }
         X parse_infix(std::string a)
         {
-            tokenize(a);
-            shuntyard();
-            return rpncalc();
+            std::vector<token> tokens;
+            tokenize(a,tokens);
+            shuntyard(tokens);
+            return rpncalc(tokens);
         }
         X parse_postfix(std::string a)
         {
-            tokenize(a);
-            return rpncalc();
+            std::vector<token> tokens;
+            tokenize(a,tokens);
+            return rpncalc(tokens);
         }
         public:
         pallache()
