@@ -146,12 +146,6 @@ namespace pallache
             functions.emplace("not",functor(true));
             functions.emplace("delvar",functor(true));
             functions.emplace("delfunc",functor(true));
-            functions.emplace("test",functor(false));
-            functions["test"].expr.push_back(token(types::number,"x"));
-            functions["test"].expr.push_back(token(types::number,"y"));
-            functions["test"].expr.push_back(token(types::operators,"**"));
-            functions["test"].var.push_back("x");
-            functions["test"].var.push_back("y");
         }
         void init()
         {
@@ -180,18 +174,18 @@ namespace pallache
         }
         int order(std::string a)
         {
-            if(a=="!") return 0;
-            if(a=="**") return 1;
-            else if(a=="*") return 2;
-            else if(a=="%") return 2;
-            else if(a=="/") return 2;
-            else if(a=="+") return 3;
-            else if(a=="-") return 3;
-            else if(a=="&") return 4;
-            else if(a=="^") return 6;
-            else if(a=="|") return 7;
-            else if(a=="&&") return 8;
-            else if(a=="||") return 9;
+            if(a=="!") return 1;
+            else if(a=="**") return 2;
+            else if(a=="*") return 3;
+            else if(a=="%") return 3;
+            else if(a=="/") return 3;
+            else if(a=="+") return 4;
+            else if(a=="-") return 4;
+            else if(a=="&") return 5;
+            else if(a=="^") return 7;
+            else if(a=="|") return 8;
+            else if(a=="&&") return 9;
+            else if(a=="||") return 10;
             else return 10;
         }
         void tokenize(std::string a,std::vector<token> &tokens)
@@ -206,13 +200,13 @@ namespace pallache
                     i++;
                     continue;
                 }
-                else if(isdigit(a[i]) or (a[i]=='-' and i+1<aSz and isdigit(a[i+1]) and (tokens.empty() or !(tokens.back().type==types::number or tokens.back().type==types::variable or tokens.back().str[0]=='!'))))
+                else if(isdigit(a[i]) or (a[i]=='-' and i+1<aSz and isdigit(a[i+1]) and (tokens.empty() or !(tokens.back().type==types::number or tokens.back().type==types::variable or tokens.back().type==types::function or tokens.back().str[0]=='!'))))
                 {
                     for(;k<aSz;k++) if(!flt(a[k]) and !((a[k]=='+' or a[k]=='-') and (a[k-1]=='e' or a[k-1]=='E'))) break;
                     tokens.push_back(token(types::number,a.substr(j,k-j)));
                     i+=k-j;
                 }
-                else if(isalpha(a[i]) or (a[i]=='-' and i+1<aSz and isalpha(a[i+1]) and (tokens.empty() or !(tokens.back().type==types::number or tokens.back().type==types::variable or tokens.back().str[0]=='!'))))
+                else if(isalpha(a[i]) or (a[i]=='-' and i+1<aSz and isalpha(a[i+1]) and (tokens.empty() or !(tokens.back().type==types::number or tokens.back().type==types::variable or tokens.back().type==types::function or tokens.back().str[0]=='!'))))
                 {
                     for(;k<aSz;k++) if(!isalnum(a[k]) and a[k]!='_') break;
                     std::string b=a.substr(j,k-j);
@@ -274,7 +268,7 @@ namespace pallache
                 break;
                 case types::operators:
                 {
-                    if(!stack.empty() and stack.top().type==types::operators and order(t.str)>=order(stack.top().str))
+                    if(!stack.empty() and (stack.top().type==types::function or (stack.top().type==types::operators and order(t.str)>=order(stack.top().str))))
                     {
                         train.push_back(stack.top());
                         stack.pop();
@@ -368,7 +362,15 @@ namespace pallache
                         functions.emplace(fname,f);
                         const size_t J=f.dim();
                         for(size_t j=0;j<J;j++) f.substitute(J-j-1,0.0);
-                        variables["ans"]=rpncalc(f.expr);
+                        try
+                        {
+                            variables["ans"]=rpncalc(f.expr);
+                        }
+                        catch(std::string a)
+                        {
+                            functions.erase(fname);
+                            throw std::string("pallache: error in function definition of ")+fname;
+                        }
                         return variables["ans"];
                     }
                     else throw std::string("pallache: in function definition of ")+fname+std::string(" ")+tokens[i].str+std::string(" is not a valid variable");
