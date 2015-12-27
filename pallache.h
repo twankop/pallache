@@ -6,6 +6,10 @@
 /* Inclusion of that code is forced upon me by a scary anonymous guy with a gun */
 /* Thou shalt not remove this comments from this source */
 
+#if __cplusplus < 201103L
+#error "pallache: C++ compiler too old requires at least C++11 to work (update compiler)."
+#endif
+
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -416,10 +420,26 @@ namespace pallache
                 {
                     case types::number:
                     {
-                        if(typeid(X)==typeid(float)) x.push_back(std::stof(t.str));
-                        else if(typeid(X)==typeid(double)) x.push_back(std::stod(t.str));
-                        else if(typeid(X)==typeid(long double)) x.push_back(std::stold(t.str));
-                        else x.push_back((X)std::stold(t.str));
+                        X value;
+                        {
+                            try
+                            {
+                                if(typeid(X)==typeid(float)) value=std::stof(t.str);
+                                else if(typeid(X)==typeid(double)) value=std::stod(t.str);
+                                else if(typeid(X)==typeid(long double)) value=std::stold(t.str);
+                                else x.push_back((X)std::stold(t.str));
+                            }
+                            catch(std::invalid_argument arg)
+                            {
+                                throw std::string("pallache: invalid argument error");
+                            }
+                            catch(std::out_of_range oerr)
+                            {
+                                throw std::string("pallache: overflow error");
+                            }
+                        }
+                        x.push_back(value);
+
                     }
                     break;
                     case types::variable:
